@@ -46,6 +46,7 @@ export const updateAssumptionTool = tool({
       confidence: confidenceSchema.optional().describe('Updated confidence level'),
       unit: z.string().optional().describe('Updated unit'),
     }).describe('The fields to update'),
+    summary: z.string().describe('A brief one-sentence summary of what was changed and why (e.g., "Updated population estimate for London instead of Chicago")'),
   }),
   execute: async (args) => {
     return { success: true, action: 'updateAssumption', ...args };
@@ -118,6 +119,7 @@ export const createResultTool = tool({
 export const buildEstimateTool = tool({
   description: 'Build a complete Fermi estimation graph with assumptions, operations, and result. Use this when creating a new estimate from scratch. This is the preferred tool for answering Fermi questions.',
   inputSchema: z.object({
+    summary: z.string().describe('A brief one-sentence summary of what this estimate calculates (e.g., "Estimate the number of piano tuners in Chicago based on population and piano ownership")'),
     assumptions: z.array(z.object({
       name: z.string(),
       description: z.string().optional(),

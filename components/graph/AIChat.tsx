@@ -124,6 +124,7 @@ export function AIChat() {
                 confidence: Confidence;
                 unit: string;
               }>;
+              summary?: string;
             };
             const nodeId = nodeNameToId.get(args.name);
             if (nodeId) {
@@ -137,10 +138,8 @@ export function AIChat() {
                 delete updatesToApply.newName;
               }
               updateNode(nodeId, updatesToApply);
-              // Save version describing the update
-              const changes = Object.keys(args.updates).filter(k => k !== 'newName').slice(0, 2);
-              const changeDesc = changes.length > 0 ? ` (${changes.join(', ')})` : '';
-              saveVersion(`Updated ${args.updates.newName || args.name}${changeDesc}`);
+              // Save version with AI-provided summary
+              saveVersion(args.summary || `Updated ${args.updates.newName || args.name}`);
             }
             break;
           }
@@ -265,6 +264,7 @@ export function AIChat() {
 
           case 'buildEstimate': {
             const args = tc.args as {
+              summary?: string;
               assumptions?: Array<{
                 name: string;
                 description?: string;
@@ -282,6 +282,7 @@ export function AIChat() {
               }>;
               finalOutput?: string;
             };
+            const versionSummary = args.summary || 'Built initial estimate';
 
             // Ensure we have arrays
             const assumptions = args.assumptions || [];
@@ -388,12 +389,6 @@ export function AIChat() {
               }
             }
 
-            // Build descriptive version name
-            const assumptionNames = assumptions.map(a => a.name).slice(0, 3);
-            const versionDesc = assumptions.length > 0
-              ? `Built: ${assumptionNames.join(', ')}${assumptions.length > 3 ? '...' : ''}`
-              : 'Built initial estimate';
-
             // Run simulation automatically after building to populate intermediate graphs
             // Use setTimeout to ensure the graph state is updated before running simulation
             setTimeout(() => {
@@ -402,10 +397,8 @@ export function AIChat() {
                 const { finalResult, nodeResults } = runGraphSimulation(latestGraph, 10000);
                 useGraphStore.getState().updateResultNode(finalResult);
                 useGraphStore.getState().setNodeSimulationResults(nodeResults);
-                // Save version with descriptive name
-                const question = latestGraph.question;
-                const fullDesc = question ? `${versionDesc} (${question.slice(0, 30)}${question.length > 30 ? '...' : ''})` : versionDesc;
-                useGraphStore.getState().saveVersion(fullDesc);
+                // Save version with AI-provided summary
+                useGraphStore.getState().saveVersion(versionSummary);
               }
             }, 100);
             break;
