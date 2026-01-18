@@ -462,6 +462,77 @@ export function AIChat() {
     ]
   );
 
+  // Helper to build graph summary for AI context
+  const buildGraphSummary = useCallback(() => {
+    const graph = useGraphStore.getState().currentGraph;
+    if (!graph || graph.nodes.length === 0) {
+      return { hasExistingGraph: false };
+    }
+    return {
+      hasExistingGraph: true,
+      assumptions: graph.nodes
+        .filter((n) => n.type === 'assumption')
+        .map((n) => ({
+          name: n.data.name,
+          min: n.data.min,
+          max: n.data.max,
+          distribution: n.data.distribution,
+          unit: n.data.unit,
+          description: n.data.description,
+        })),
+      operations: graph.nodes
+        .filter((n) => n.type === 'operation')
+        .map((n) => ({
+          label: n.data.label,
+          operation: n.data.operation,
+        })),
+      hasResultNode: graph.nodes.some((n) => n.type === 'result'),
+      resultNodeCount: graph.nodes.filter((n) => n.type === 'result').length,
+      edgeCount: graph.edges.length,
+    };
+  }, []);
+
+  // Helper to validate and fix graph state, returns issues that were found
+  const validateAndFixGraph = useCallback(() => {
+    const graph = useGraphStore.getState().currentGraph;
+    if (!graph) return { hadIssues: false, fixedIssues: [] };
+
+    const fixedIssues: string[] = [];
+    const resultNodes = graph.nodes.filter((n) => n.type === 'result');
+
+    // Fix multiple result nodes by keeping only the first one
+    if (resultNodes.length > 1) {
+      const nodesToRemove = resultNodes.slice(1); // Keep first, remove rest
+      for (const node of nodesToRemove) {
+        removeNode(node.id);
+      }
+      fixedIssues.push(`Removed ${nodesToRemove.length} extra result node(s) - only one is allowed.`);
+    }
+
+    return { hadIssues: fixedIssues.length > 0, fixedIssues };
+  }, [removeNode]);
+
+  // Helper to send message to AI and get response
+  const sendToAI = useCallback(async (message: string, context?: string) => {
+    const graphSummary = buildGraphSummary();
+
+    const response = await fetch('/api/gemini', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message,
+        context,
+        graphState: graphSummary,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to get response');
+    }
+
+    return await response.json() as AIResponse;
+  }, [buildGraphSummary]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isLoading) return;
@@ -477,57 +548,29 @@ export function AIChat() {
     setIsLoading(true);
 
     try {
-      // Build a clear summary of the current graph for the AI
-      const graphSummary = currentGraph && currentGraph.nodes.length > 0
-        ? {
-            hasExistingGraph: true,
-            assumptions: currentGraph.nodes
-              .filter((n) => n.type === 'assumption')
-              .map((n) => ({
-                name: n.data.name,
-                min: n.data.min,
-                max: n.data.max,
-                distribution: n.data.distribution,
-                unit: n.data.unit,
-                description: n.data.description,
-              })),
-            operations: currentGraph.nodes
-              .filter((n) => n.type === 'operation')
-              .map((n) => ({
-                label: n.data.label,
-                operation: n.data.operation,
-              })),
-            hasResultNode: currentGraph.nodes.some((n) => n.type === 'result'),
-            edgeCount: currentGraph.edges.length,
-          }
-        : { hasExistingGraph: false };
-
-      // Send request with current graph state
-      const response = await fetch('/api/gemini', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: userMessage,
-          context: currentGraph?.question,
-          graphState: graphSummary,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to get response');
-      }
-
-      const data: AIResponse = await response.json();
+      // Send to AI
+      const data = await sendToAI(userMessage, currentGraph?.question);
 
       // Process any tool calls
       if (data.toolCalls && data.toolCalls.length > 0) {
         processToolCalls(data.toolCalls);
       }
 
-      // Add assistant message with tool call info
+      // Validate and auto-fix graph issues
+      const { hadIssues, fixedIssues } = validateAndFixGraph();
+
+      // Build response content
+      let responseContent = data.response || 'I\'ve updated the graph based on your request.';
+
+      if (hadIssues) {
+        // Append fix notification to response
+        responseContent += `\n\n⚠️ Auto-fixed: ${fixedIssues.join(' ')}`;
+      }
+
+      // Add assistant message
       addChatMessage({
         role: 'assistant',
-        content: data.response || 'I\'ve updated the graph based on your request.',
+        content: responseContent,
         toolCalls: data.toolCalls?.map((tc) => ({
           toolName: tc.toolName,
           args: tc.args,
