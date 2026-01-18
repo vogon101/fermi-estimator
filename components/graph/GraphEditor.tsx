@@ -20,7 +20,7 @@ import {
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
 import { useGraphStore } from '@/lib/graph-store';
-import { runGraphSimulation } from '@/lib/monte-carlo';
+import { runGraphSimulation, formatNumber } from '@/lib/monte-carlo';
 import { AssumptionNode } from './AssumptionNode';
 import { OperationNode } from './OperationNode';
 import { ResultNode } from './ResultNode';
@@ -257,7 +257,7 @@ export function GraphEditor() {
           <Panel position="bottom-right" className="bg-card border rounded-lg p-3 text-sm">
             <div className="font-medium mb-1">Last Simulation</div>
             <div className="text-muted-foreground">
-              Median: {simulationResult.percentiles.p50.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+              Median: {formatNumber(simulationResult.percentiles.p50)}
             </div>
           </Panel>
         )}
