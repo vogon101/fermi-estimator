@@ -171,6 +171,8 @@ export const useGraphStore = create<GraphState>()(
           currentGraph: createEmptyGraph(question),
           simulationResult: null,
           chatMessages: [],
+          // Clear version history when creating a new project
+          versions: [],
         });
       },
 
@@ -538,6 +540,8 @@ export const useGraphStore = create<GraphState>()(
             simulationResult: null,
             // Restore chat history from saved graph, or empty if none
             chatMessages: graph.chatHistory || [],
+            // Clear version history when loading a different project
+            versions: [],
           });
         }
       },
@@ -738,21 +742,22 @@ export const useGraphStore = create<GraphState>()(
         const { currentGraph, simulationResult, versions } = get();
         if (!currentGraph) return;
 
-        // Deep clone the graph to avoid reference issues
-        const graphClone: GraphEstimate = JSON.parse(JSON.stringify({
+        // Deep clone the graph, excluding chatHistory to save space
+        const graphForVersion: GraphEstimate = JSON.parse(JSON.stringify({
           ...currentGraph,
+          chatHistory: undefined, // Don't store chat in versions
           createdAt: currentGraph.createdAt.toISOString(),
           updatedAt: currentGraph.updatedAt.toISOString(),
         }));
         // Convert dates back
-        graphClone.createdAt = new Date(graphClone.createdAt);
-        graphClone.updatedAt = new Date(graphClone.updatedAt);
+        graphForVersion.createdAt = new Date(graphForVersion.createdAt);
+        graphForVersion.updatedAt = new Date(graphForVersion.updatedAt);
 
         const version: GraphVersion = {
           id: uuidv4(),
           timestamp: new Date(),
           description,
-          graph: graphClone,
+          graph: graphForVersion,
           simulationResult: simulationResult ? {
             p5: simulationResult.percentiles.p5,
             p50: simulationResult.percentiles.p50,
@@ -760,8 +765,8 @@ export const useGraphStore = create<GraphState>()(
           } : undefined,
         };
 
-        // Keep last 50 versions max
-        const newVersions = [version, ...versions].slice(0, 50);
+        // Keep last 20 versions max (reduced from 50 to save memory)
+        const newVersions = [version, ...versions].slice(0, 20);
         set({ versions: newVersions });
       },
 
@@ -794,10 +799,53 @@ export const useGraphStore = create<GraphState>()(
     }),
     {
       name: 'fermi-graph-storage',
+      // Only persist saved graphs, not versions (those are session-only for undo)
       partialize: (state) => ({
         savedGraphs: state.savedGraphs,
-        versions: state.versions,
       }),
+      // Custom storage with error handling for quota exceeded
+      storage: {
+        getItem: (name) => {
+          try {
+            const str = localStorage.getItem(name);
+            return str ? JSON.parse(str) : null;
+          } catch (error) {
+            console.error('Failed to read from localStorage:', error);
+            return null;
+          }
+        },
+        setItem: (name, value) => {
+          try {
+            localStorage.setItem(name, JSON.stringify(value));
+          } catch (error) {
+            if (error instanceof Error && error.name === 'QuotaExceededError') {
+              console.error('LocalStorage quota exceeded. Clearing old data...');
+              // Try to clear and save again
+              try {
+                localStorage.removeItem(name);
+                localStorage.setItem(name, JSON.stringify(value));
+              } catch {
+                console.error('Failed to save even after clearing. Data not persisted.');
+              }
+            } else {
+              console.error('Failed to save to localStorage:', error);
+            }
+          }
+        },
+        removeItem: (name) => {
+          try {
+            localStorage.removeItem(name);
+          } catch (error) {
+            console.error('Failed to remove from localStorage:', error);
+          }
+        },
+      },
+      // Handle rehydration errors gracefully
+      onRehydrateStorage: () => (state, error) => {
+        if (error) {
+          console.error('Failed to rehydrate storage:', error);
+        }
+      },
     }
   )
 );
