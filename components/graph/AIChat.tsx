@@ -492,25 +492,20 @@ export function AIChat() {
     };
   }, []);
 
-  // Helper to validate and fix graph state, returns issues that were found
-  const validateAndFixGraph = useCallback(() => {
+  // Helper to validate graph state and return issues
+  const validateGraph = useCallback(() => {
     const graph = useGraphStore.getState().currentGraph;
-    if (!graph) return { hadIssues: false, fixedIssues: [] };
+    if (!graph) return { valid: true, issues: [] };
 
-    const fixedIssues: string[] = [];
+    const issues: string[] = [];
     const resultNodes = graph.nodes.filter((n) => n.type === 'result');
 
-    // Fix multiple result nodes by keeping only the first one
     if (resultNodes.length > 1) {
-      const nodesToRemove = resultNodes.slice(1); // Keep first, remove rest
-      for (const node of nodesToRemove) {
-        removeNode(node.id);
-      }
-      fixedIssues.push(`Removed ${nodesToRemove.length} extra result node(s) - only one is allowed.`);
+      issues.push(`Multiple result nodes detected (${resultNodes.length}). Only one result node is allowed. This may indicate the model structure is incorrect.`);
     }
 
-    return { hadIssues: fixedIssues.length > 0, fixedIssues };
-  }, [removeNode]);
+    return { valid: issues.length === 0, issues };
+  }, []);
 
   // Helper to send message to AI and get response
   const sendToAI = useCallback(async (message: string, context?: string) => {
@@ -556,26 +551,72 @@ export function AIChat() {
         processToolCalls(data.toolCalls);
       }
 
-      // Validate and auto-fix graph issues
-      const { hadIssues, fixedIssues } = validateAndFixGraph();
+      // Validate graph after processing
+      const validation = validateGraph();
 
-      // Build response content
-      let responseContent = data.response || 'I\'ve updated the graph based on your request.';
+      if (!validation.valid) {
+        // Graph has issues - add the initial response first
+        addChatMessage({
+          role: 'assistant',
+          content: data.response || 'I\'ve updated the graph.',
+          toolCalls: data.toolCalls?.map((tc) => ({
+            toolName: tc.toolName,
+            args: tc.args,
+          })),
+        });
 
-      if (hadIssues) {
-        // Append fix notification to response
-        responseContent += `\n\n⚠️ Auto-fixed: ${fixedIssues.join(' ')}`;
+        // Build correction request for the AI
+        const issueDescription = validation.issues.join(' ');
+        const correctionMessage = `There's an issue with the graph you created: ${issueDescription} Please analyze the model structure and fix it. You may need to use clearGraph and rebuild, or delete specific nodes. Remember: only ONE result node is allowed, and all calculations should flow into it.`;
+
+        // Show that we're asking AI to fix
+        addChatMessage({
+          role: 'user',
+          content: `[System: Requesting correction] ${issueDescription}`,
+        });
+
+        // Retry with correction request
+        const retryData = await sendToAI(correctionMessage, currentGraph?.question);
+
+        if (retryData.toolCalls && retryData.toolCalls.length > 0) {
+          processToolCalls(retryData.toolCalls);
+        }
+
+        // Check if fixed after retry
+        const retryValidation = validateGraph();
+
+        if (!retryValidation.valid) {
+          // Still broken - report to user
+          addChatMessage({
+            role: 'assistant',
+            content: `⚠️ I wasn't able to fix the graph structure automatically.\n\n**Issues:** ${retryValidation.issues.join(' ')}\n\n**To fix manually:**\n1. Select the extra result nodes in the graph\n2. Press Delete to remove them\n3. Or click "New" to start fresh\n\nThe AI may have misunderstood the request - try rephrasing your question.`,
+            toolCalls: retryData.toolCalls?.map((tc) => ({
+              toolName: tc.toolName,
+              args: tc.args,
+            })),
+          });
+        } else {
+          // Fixed successfully
+          addChatMessage({
+            role: 'assistant',
+            content: retryData.response || 'I\'ve corrected the graph structure.',
+            toolCalls: retryData.toolCalls?.map((tc) => ({
+              toolName: tc.toolName,
+              args: tc.args,
+            })),
+          });
+        }
+      } else {
+        // No issues - add normal response
+        addChatMessage({
+          role: 'assistant',
+          content: data.response || 'I\'ve updated the graph based on your request.',
+          toolCalls: data.toolCalls?.map((tc) => ({
+            toolName: tc.toolName,
+            args: tc.args,
+          })),
+        });
       }
-
-      // Add assistant message
-      addChatMessage({
-        role: 'assistant',
-        content: responseContent,
-        toolCalls: data.toolCalls?.map((tc) => ({
-          toolName: tc.toolName,
-          args: tc.args,
-        })),
-      });
     } catch (error) {
       addChatMessage({
         role: 'assistant',
