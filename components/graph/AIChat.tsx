@@ -152,10 +152,34 @@ export function AIChat() {
           }
 
           case 'createOperation': {
-            const args = tc.args as { operation: OperationType; label?: string };
+            const args = tc.args as { operation: OperationType; label: string };
             const label = args.label || args.operation;
-            const id = addOperationNode(args.operation);
+            const id = addOperationNode(args.operation, undefined, label);
             nodeNameToId.set(label, id);
+            break;
+          }
+
+          case 'updateOperation': {
+            const args = tc.args as {
+              name: string;
+              updates: Partial<{
+                newLabel: string;
+                operation: OperationType;
+              }>;
+            };
+            const nodeId = nodeNameToId.get(args.name);
+            if (nodeId) {
+              const updatesToApply: Record<string, unknown> = {};
+              if (args.updates.operation) {
+                updatesToApply.operation = args.updates.operation;
+              }
+              if (args.updates.newLabel) {
+                updatesToApply.label = args.updates.newLabel;
+                nodeNameToId.delete(args.name);
+                nodeNameToId.set(args.updates.newLabel, nodeId);
+              }
+              updateNode(nodeId, updatesToApply);
+            }
             break;
           }
 

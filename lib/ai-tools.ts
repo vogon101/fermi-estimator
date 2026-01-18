@@ -65,13 +65,28 @@ export const deleteAssumptionTool = tool({
 
 // Tool: Create an operation node
 export const createOperationTool = tool({
-  description: 'Create a new operation node (multiply, divide, add, subtract) to combine values in the calculation.',
+  description: 'Create a new operation node (multiply, divide, add, subtract, sum, product) to combine values in the calculation. ALWAYS provide a descriptive label that explains what this operation computes.',
   inputSchema: z.object({
-    operation: operationSchema.describe('The type of operation: multiply (×), divide (÷), add (+), or subtract (−)'),
-    label: z.string().optional().describe('An optional label for this operation'),
+    operation: operationSchema.describe('The type of operation: multiply (×), divide (÷), add (+), subtract (−), sum (Σ), product (∏)'),
+    label: z.string().describe('A descriptive name for what this operation computes (e.g., "totalPianos", "tuningsPerYear", "annualRevenue"). This is REQUIRED.'),
   }),
   execute: async (args) => {
     return { success: true, action: 'createOperation', ...args };
+  },
+});
+
+// Tool: Update an operation node
+export const updateOperationTool = tool({
+  description: 'Update an existing operation node by its label. Use this to rename operations or change the operation type.',
+  inputSchema: z.object({
+    name: z.string().describe('The current label of the operation to update'),
+    updates: z.object({
+      newLabel: z.string().optional().describe('New label for the operation (use this to rename)'),
+      operation: operationSchema.optional().describe('New operation type'),
+    }).describe('The fields to update'),
+  }),
+  execute: async (args) => {
+    return { success: true, action: 'updateOperation', ...args };
   },
 });
 
@@ -263,6 +278,7 @@ export const fermiTools = {
   updateAssumption: updateAssumptionTool,
   deleteAssumption: deleteAssumptionTool,
   createOperation: createOperationTool,
+  updateOperation: updateOperationTool,
   deleteOperation: deleteOperationTool,
   createConstant: createConstantTool,
   createFunction: createFunctionTool,
@@ -287,7 +303,8 @@ You have access to these tools via function calling:
 - runSimulation: Run Monte Carlo simulation on the graph
 - updateAssumption: Modify an existing assumption's values OR rename it
 - createAssumption, deleteAssumption: Add or remove assumptions
-- createOperation, deleteOperation, connectNodes, createResult: Build/modify graph structure
+- createOperation, updateOperation, deleteOperation: Build/modify operations (ALWAYS provide descriptive labels!)
+- connectNodes, createResult: Wire up graph structure
 - createConstant: Add fixed values with no uncertainty (e.g., pi, conversion factors, days per year)
 - createFunction: Apply mathematical functions (sqrt, log, exp, pow, abs, min, max, custom expressions)
 - createConditional: If-then-else logic based on comparisons
@@ -305,6 +322,22 @@ You have access to these tools via function calling:
 5. **Conditionals**: If-then-else logic (if a > b then X else Y)
 6. **Clamps**: Bound values within realistic ranges
 7. **Result**: Final output node
+
+## IMPORTANT: Always Name Operations!
+
+Every operation node MUST have a descriptive label that explains what it computes. This makes the graph readable and understandable.
+
+Good examples:
+- "totalPianos" for (households × pianosPerHousehold)
+- "tuningsPerYear" for (totalPianos × tuningsPerPianoPerYear)
+- "annualDemand" for (tuningsPerYear)
+- "tunersNeeded" for (annualDemand ÷ tuningsPerTuner)
+
+Bad examples:
+- "×" or "multiply" (doesn't explain what's being computed)
+- "op1", "operation" (meaningless labels)
+
+When editing existing operations, use updateOperation to rename them if they have poor labels.
 
 DO NOT describe what you would do. DO NOT apologize about limitations. Actually call the tools by invoking them as function calls.
 

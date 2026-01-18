@@ -259,7 +259,18 @@ function AssumptionNodeComponent({ id, data, selected }: NodeProps<AssumptionNod
     unit: data.unit || '',
     description: data.description || '',
     confidence: data.confidence || 'medium' as Confidence,
+    source: data.source || '',
   });
+
+  // Check if source is a URL
+  const isSourceUrl = (source: string) => {
+    try {
+      new URL(source);
+      return true;
+    } catch {
+      return source.startsWith('http://') || source.startsWith('https://');
+    }
+  };
 
   const updateNode = useGraphStore((state) => state.updateNode);
 
@@ -273,6 +284,7 @@ function AssumptionNodeComponent({ id, data, selected }: NodeProps<AssumptionNod
       unit: editData.unit || undefined,
       description: editData.description || undefined,
       confidence: editData.confidence,
+      source: editData.source || undefined,
     });
     setIsEditing(false);
   };
@@ -287,6 +299,7 @@ function AssumptionNodeComponent({ id, data, selected }: NodeProps<AssumptionNod
       unit: data.unit || '',
       description: data.description || '',
       confidence: data.confidence || 'medium',
+      source: data.source || '',
     });
     setIsEditing(true);
   };
@@ -335,9 +348,22 @@ function AssumptionNodeComponent({ id, data, selected }: NodeProps<AssumptionNod
           )}
 
           {data.source && (
-            <p className="text-[10px] text-blue-600 dark:text-blue-400 line-clamp-1" title={data.source}>
-              📚 {data.source}
-            </p>
+            isSourceUrl(data.source) ? (
+              <a
+                href={data.source}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="text-[10px] text-blue-600 dark:text-blue-400 line-clamp-1 hover:underline cursor-pointer"
+                title={data.source}
+              >
+                📚 {data.source}
+              </a>
+            ) : (
+              <p className="text-[10px] text-blue-600 dark:text-blue-400 line-clamp-1" title={data.source}>
+                📚 {data.source}
+              </p>
+            )
           )}
 
           <p className="text-[9px] text-muted-foreground/50 text-center">
@@ -445,6 +471,29 @@ function AssumptionNodeComponent({ id, data, selected }: NodeProps<AssumptionNod
                 value={editData.description}
                 onChange={(e) => setEditData({ ...editData, description: e.target.value })}
               />
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="source">Source</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="source"
+                  value={editData.source}
+                  onChange={(e) => setEditData({ ...editData, source: e.target.value })}
+                  placeholder="URL or reference (e.g., https://... or 'Census 2020')"
+                  className="flex-1"
+                />
+                {editData.source && isSourceUrl(editData.source) && (
+                  <a
+                    href={editData.source}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-center px-3 rounded-md border border-input bg-background hover:bg-accent hover:text-accent-foreground text-sm"
+                  >
+                    Open ↗
+                  </a>
+                )}
+              </div>
             </div>
           </div>
 
