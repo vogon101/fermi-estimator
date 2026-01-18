@@ -2,7 +2,14 @@ import type { Node, Edge } from '@xyflow/react';
 
 export type Distribution = 'uniform' | 'normal' | 'lognormal';
 export type Confidence = 'low' | 'medium' | 'high';
-export type OperationType = 'multiply' | 'divide' | 'add' | 'subtract';
+export type OperationType = 'multiply' | 'divide' | 'add' | 'subtract' | 'sum' | 'product';
+export type FunctionType =
+  | 'sqrt' | 'square' | 'pow' | 'exp' | 'log' | 'log10' | 'log2'
+  | 'abs' | 'ceil' | 'floor' | 'round'
+  | 'sin' | 'cos' | 'tan'
+  | 'min' | 'max'
+  | 'custom';
+export type ComparisonType = 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'neq';
 
 // Base assumption data
 export interface AssumptionData {
@@ -35,11 +42,51 @@ export interface ResultNodeData {
   [key: string]: unknown;
 }
 
+export interface ConstantNodeData {
+  label: string;
+  value: number;
+  unit?: string;
+  description?: string;
+  [key: string]: unknown;
+}
+
+export interface FunctionNodeData {
+  label: string;
+  function: FunctionType;
+  // For 'pow': the exponent; for 'custom': the expression with 'x' as variable
+  parameter?: number | string;
+  [key: string]: unknown;
+}
+
+export interface ConditionalNodeData {
+  label: string;
+  comparison: ComparisonType;
+  [key: string]: unknown;
+}
+
+export interface ClampNodeData {
+  label: string;
+  min?: number;
+  max?: number;
+  [key: string]: unknown;
+}
+
 // Type-safe node types
 export type AssumptionNode = Node<AssumptionNodeData, 'assumption'>;
 export type OperationNode = Node<OperationNodeData, 'operation'>;
 export type ResultNode = Node<ResultNodeData, 'result'>;
-export type EstimateNode = AssumptionNode | OperationNode | ResultNode;
+export type ConstantNode = Node<ConstantNodeData, 'constant'>;
+export type FunctionNode = Node<FunctionNodeData, 'function'>;
+export type ConditionalNode = Node<ConditionalNodeData, 'conditional'>;
+export type ClampNode = Node<ClampNodeData, 'clamp'>;
+export type EstimateNode =
+  | AssumptionNode
+  | OperationNode
+  | ResultNode
+  | ConstantNode
+  | FunctionNode
+  | ConditionalNode
+  | ClampNode;
 
 // Graph-based estimate
 export interface GraphEstimate {
@@ -48,8 +95,22 @@ export interface GraphEstimate {
   question: string;
   nodes: EstimateNode[];
   edges: Edge[];
+  chatHistory?: ChatMessage[];
   createdAt: Date;
   updatedAt: Date;
+}
+
+// Version history entry
+export interface GraphVersion {
+  id: string;
+  timestamp: Date;
+  description: string;
+  graph: GraphEstimate;
+  simulationResult?: {
+    p5: number;
+    p50: number;
+    p95: number;
+  };
 }
 
 // Legacy types for backward compatibility

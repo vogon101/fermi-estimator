@@ -1,4 +1,15 @@
-import type { Assumption, SimulationResult, GraphEstimate, OperationType } from './types';
+import type {
+  Assumption,
+  SimulationResult,
+  GraphEstimate,
+  OperationType,
+  FunctionType,
+  ComparisonType,
+  FunctionNodeData,
+  ConditionalNodeData,
+  ClampNodeData,
+  ConstantNodeData,
+} from './types';
 
 // Intermediate results for each node in the graph
 export interface NodeSimulationResult {
@@ -105,6 +116,76 @@ export function evaluateFormula(
 
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Evaluate a custom expression with x as the variable
+function evaluateCustomExpression(expr: string, x: number): number {
+  try {
+    // Replace mathematical functions and constants
+    let expression = expr
+      .replace(/\bpi\b/gi, `(${Math.PI})`)
+      .replace(/\be\b/gi, `(${Math.E})`)
+      .replace(/\bsqrt\s*\(/gi, 'Math.sqrt(')
+      .replace(/\babs\s*\(/gi, 'Math.abs(')
+      .replace(/\bsin\s*\(/gi, 'Math.sin(')
+      .replace(/\bcos\s*\(/gi, 'Math.cos(')
+      .replace(/\btan\s*\(/gi, 'Math.tan(')
+      .replace(/\blog\s*\(/gi, 'Math.log(')
+      .replace(/\bexp\s*\(/gi, 'Math.exp(')
+      .replace(/\bx\b/g, `(${x})`)
+      .replace(/\^/g, '**'); // Convert ^ to **
+
+    // Evaluate safely
+    const result = new Function(`return ${expression}`)();
+    if (typeof result !== 'number' || !isFinite(result)) {
+      return NaN;
+    }
+    return result;
+  } catch {
+    return NaN;
+  }
+}
+
+// Apply a comparison operation
+function applyComparison(a: number, b: number, comparison: ComparisonType): boolean {
+  switch (comparison) {
+    case 'gt': return a > b;
+    case 'gte': return a >= b;
+    case 'lt': return a < b;
+    case 'lte': return a <= b;
+    case 'eq': return a === b;
+    case 'neq': return a !== b;
+    default: return false;
+  }
+}
+
+// Apply a mathematical function
+function applyFunction(func: FunctionType, input: number, inputB?: number, parameter?: number | string): number {
+  switch (func) {
+    case 'sqrt': return Math.sqrt(input);
+    case 'square': return input * input;
+    case 'pow': return Math.pow(input, typeof parameter === 'number' ? parameter : 2);
+    case 'exp': return Math.exp(input);
+    case 'log': return Math.log(input);
+    case 'log10': return Math.log10(input);
+    case 'log2': return Math.log2(input);
+    case 'abs': return Math.abs(input);
+    case 'ceil': return Math.ceil(input);
+    case 'floor': return Math.floor(input);
+    case 'round': return Math.round(input);
+    case 'sin': return Math.sin(input);
+    case 'cos': return Math.cos(input);
+    case 'tan': return Math.tan(input);
+    case 'min': return Math.min(input, inputB ?? input);
+    case 'max': return Math.max(input, inputB ?? input);
+    case 'custom':
+      if (typeof parameter === 'string') {
+        return evaluateCustomExpression(parameter, input);
+      }
+      return input;
+    default:
+      return input;
+  }
 }
 
 // Run Monte Carlo simulation
@@ -290,6 +371,10 @@ export function runGraphSimulation(
         distribution: data.distribution,
       };
       value = sampleAssumption(assumption);
+    } else if (node.type === 'constant') {
+      // Constant node returns its fixed value
+      const data = node.data as ConstantNodeData;
+      value = data.value;
     } else if (node.type === 'operation') {
       const data = node.data;
       const incoming = incomingEdges.get(nodeId) || [];
@@ -322,8 +407,85 @@ export function runGraphSimulation(
         case 'subtract':
           value = inputA - inputB;
           break;
+        case 'sum':
+          // Sum all inputs
+          value = incoming.reduce((acc, edge) => {
+            return acc + computeNodeValue(edge.sourceId, iterationValues);
+          }, 0);
+          break;
+        case 'product':
+          // Product of all inputs
+          value = incoming.reduce((acc, edge) => {
+            return acc * computeNodeValue(edge.sourceId, iterationValues);
+          }, 1);
+          break;
         default:
           value = 0;
+      }
+    } else if (node.type === 'function') {
+      // Function node applies a mathematical function
+      const data = node.data as FunctionNodeData;
+      const incoming = incomingEdges.get(nodeId) || [];
+
+      // Get input values (some functions need 2 inputs like min/max)
+      let inputA = 0;
+      let inputB = 0;
+
+      for (const edge of incoming) {
+        const inputValue = computeNodeValue(edge.sourceId, iterationValues);
+        if (edge.handle === 'a' || edge.handle === 'input' || (!edge.handle && incoming.indexOf(edge) === 0)) {
+          inputA = inputValue;
+        } else {
+          inputB = inputValue;
+        }
+      }
+
+      value = applyFunction(data.function, inputA, inputB, data.parameter);
+    } else if (node.type === 'conditional') {
+      // Conditional node: if (a comparison b) then thenValue else elseValue
+      const data = node.data as ConditionalNodeData;
+      const incoming = incomingEdges.get(nodeId) || [];
+
+      let aValue = 0;
+      let bValue = 0;
+      let thenValue = 0;
+      let elseValue = 0;
+
+      for (const edge of incoming) {
+        const inputValue = computeNodeValue(edge.sourceId, iterationValues);
+        switch (edge.handle) {
+          case 'a':
+            aValue = inputValue;
+            break;
+          case 'b':
+            bValue = inputValue;
+            break;
+          case 'then':
+            thenValue = inputValue;
+            break;
+          case 'else':
+            elseValue = inputValue;
+            break;
+        }
+      }
+
+      const conditionMet = applyComparison(aValue, bValue, data.comparison);
+      value = conditionMet ? thenValue : elseValue;
+    } else if (node.type === 'clamp') {
+      // Clamp node constrains input to min/max bounds
+      const data = node.data as ClampNodeData;
+      const incoming = incomingEdges.get(nodeId) || [];
+
+      if (incoming.length > 0) {
+        value = computeNodeValue(incoming[0].sourceId, iterationValues);
+        if (data.min !== undefined) {
+          value = Math.max(value, data.min);
+        }
+        if (data.max !== undefined) {
+          value = Math.min(value, data.max);
+        }
+      } else {
+        value = 0;
       }
     } else if (node.type === 'result') {
       // Result node just passes through its input

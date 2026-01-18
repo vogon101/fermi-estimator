@@ -18,6 +18,8 @@ const operationSymbols: Record<OperationType, string> = {
   divide: '÷',
   add: '+',
   subtract: '−',
+  sum: 'Σ',
+  product: '∏',
 };
 
 const operationColors: Record<OperationType, string> = {
@@ -25,6 +27,8 @@ const operationColors: Record<OperationType, string> = {
   divide: 'bg-orange-500',
   add: 'bg-green-500',
   subtract: 'bg-red-500',
+  sum: 'bg-emerald-500',
+  product: 'bg-violet-500',
 };
 
 const operationNames: Record<OperationType, string> = {
@@ -32,6 +36,8 @@ const operationNames: Record<OperationType, string> = {
   divide: 'Divide',
   add: 'Add',
   subtract: 'Subtract',
+  sum: 'Sum',
+  product: 'Product',
 };
 
 // Create mini histogram bars from samples

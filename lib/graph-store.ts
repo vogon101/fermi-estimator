@@ -13,12 +13,19 @@ import {
 import type {
   EstimateNode,
   GraphEstimate,
+  GraphVersion,
   SimulationResult,
   ChatMessage,
   AssumptionNodeData,
   OperationNodeData,
   ResultNodeData,
+  ConstantNodeData,
+  FunctionNodeData,
+  ConditionalNodeData,
+  ClampNodeData,
   OperationType,
+  FunctionType,
+  ComparisonType,
 } from './types';
 import type { NodeSimulationResult } from './monte-carlo';
 
@@ -30,6 +37,9 @@ interface GraphState {
 
   // Saved graphs
   savedGraphs: GraphEstimate[];
+
+  // Version history
+  versions: GraphVersion[];
 
   // Chat messages
   chatMessages: ChatMessage[];
@@ -48,7 +58,11 @@ interface GraphState {
   addAssumptionNode: (data: Omit<AssumptionNodeData, 'label'> & { label?: string }, position?: { x: number; y: number }) => string;
   addOperationNode: (operation: OperationType, position?: { x: number; y: number }, label?: string) => string;
   addResultNode: (position?: { x: number; y: number }) => string;
-  updateNode: (id: string, data: Partial<AssumptionNodeData | OperationNodeData | ResultNodeData>) => void;
+  addConstantNode: (data: { label: string; value: number; unit?: string; description?: string }, position?: { x: number; y: number }) => string;
+  addFunctionNode: (func: FunctionType, position?: { x: number; y: number }, label?: string, parameter?: number | string) => string;
+  addConditionalNode: (comparison: ComparisonType, position?: { x: number; y: number }, label?: string) => string;
+  addClampNode: (position?: { x: number; y: number }, label?: string, min?: number, max?: number) => string;
+  updateNode: (id: string, data: Partial<AssumptionNodeData | OperationNodeData | ResultNodeData | ConstantNodeData | FunctionNodeData | ConditionalNodeData | ClampNodeData>) => void;
   removeNode: (id: string) => void;
 
   // Actions - Edges
@@ -74,6 +88,11 @@ interface GraphState {
 
   // Actions - Layout
   layoutGraph: () => void;
+
+  // Actions - Version History
+  saveVersion: (description: string) => void;
+  restoreVersion: (versionId: string) => void;
+  clearVersions: () => void;
 }
 
 const createEmptyGraph = (question: string = ''): GraphEstimate => ({
@@ -102,6 +121,7 @@ export const useGraphStore = create<GraphState>()(
       simulationResult: null,
       nodeSimulationResults: new Map(),
       savedGraphs: [],
+      versions: [],
       chatMessages: [],
 
       onNodesChange: (changes) => {
@@ -265,6 +285,126 @@ export const useGraphStore = create<GraphState>()(
         return id;
       },
 
+      addConstantNode: (data, position) => {
+        const { currentGraph } = get();
+        if (!currentGraph) return '';
+
+        const id = uuidv4();
+        const pos = position || getNextPosition();
+
+        const newNode: EstimateNode = {
+          id,
+          type: 'constant',
+          position: pos,
+          data: {
+            label: data.label,
+            value: data.value,
+            unit: data.unit,
+            description: data.description,
+          } as ConstantNodeData,
+        };
+
+        set({
+          currentGraph: {
+            ...currentGraph,
+            nodes: [...currentGraph.nodes, newNode],
+            updatedAt: new Date(),
+          },
+          simulationResult: null,
+        });
+
+        return id;
+      },
+
+      addFunctionNode: (func, position, label, parameter) => {
+        const { currentGraph } = get();
+        if (!currentGraph) return '';
+
+        const id = uuidv4();
+        const pos = position || getNextPosition();
+
+        const newNode: EstimateNode = {
+          id,
+          type: 'function',
+          position: pos,
+          data: {
+            label: label || func,
+            function: func,
+            parameter,
+          } as FunctionNodeData,
+        };
+
+        set({
+          currentGraph: {
+            ...currentGraph,
+            nodes: [...currentGraph.nodes, newNode],
+            updatedAt: new Date(),
+          },
+          simulationResult: null,
+        });
+
+        return id;
+      },
+
+      addConditionalNode: (comparison, position, label) => {
+        const { currentGraph } = get();
+        if (!currentGraph) return '';
+
+        const id = uuidv4();
+        const pos = position || getNextPosition();
+
+        const newNode: EstimateNode = {
+          id,
+          type: 'conditional',
+          position: pos,
+          data: {
+            label: label || 'Conditional',
+            comparison,
+          } as ConditionalNodeData,
+        };
+
+        set({
+          currentGraph: {
+            ...currentGraph,
+            nodes: [...currentGraph.nodes, newNode],
+            updatedAt: new Date(),
+          },
+          simulationResult: null,
+        });
+
+        return id;
+      },
+
+      addClampNode: (position, label, min, max) => {
+        const { currentGraph } = get();
+        if (!currentGraph) return '';
+
+        const id = uuidv4();
+        const pos = position || getNextPosition();
+
+        const newNode: EstimateNode = {
+          id,
+          type: 'clamp',
+          position: pos,
+          data: {
+            label: label || 'Clamp',
+            min,
+            max,
+          } as ClampNodeData,
+        };
+
+        set({
+          currentGraph: {
+            ...currentGraph,
+            nodes: [...currentGraph.nodes, newNode],
+            updatedAt: new Date(),
+          },
+          simulationResult: null,
+        });
+
+        return id;
+      },
+
       updateNode: (id, data) => {
         const { currentGraph } = get();
         if (currentGraph) {
@@ -368,17 +508,22 @@ export const useGraphStore = create<GraphState>()(
       },
 
       saveCurrentGraph: () => {
-        const { currentGraph, savedGraphs } = get();
+        const { currentGraph, savedGraphs, chatMessages } = get();
         if (currentGraph) {
+          // Include chat history in the saved graph
+          const graphWithChat = {
+            ...currentGraph,
+            chatHistory: chatMessages,
+          };
           const existingIndex = savedGraphs.findIndex(
             (g) => g.id === currentGraph.id
           );
           if (existingIndex >= 0) {
             const updated = [...savedGraphs];
-            updated[existingIndex] = currentGraph;
+            updated[existingIndex] = graphWithChat;
             set({ savedGraphs: updated });
           } else {
-            set({ savedGraphs: [...savedGraphs, currentGraph] });
+            set({ savedGraphs: [...savedGraphs, graphWithChat] });
           }
         }
       },
@@ -391,7 +536,8 @@ export const useGraphStore = create<GraphState>()(
           set({
             currentGraph: { ...graph },
             simulationResult: null,
-            chatMessages: [],
+            // Restore chat history from saved graph, or empty if none
+            chatMessages: graph.chatHistory || [],
           });
         }
       },
@@ -444,7 +590,11 @@ export const useGraphStore = create<GraphState>()(
         // Layout constants
         const ASSUMPTION_WIDTH = 220;
         const ASSUMPTION_HEIGHT = 180;
+        const CONSTANT_HEIGHT = 120;
         const OPERATION_SIZE = 100;
+        const FUNCTION_SIZE = 100;
+        const CONDITIONAL_SIZE = 120;
+        const CLAMP_SIZE = 100;
         const RESULT_HEIGHT = 150;
         const HORIZONTAL_GAP = 80;
         const VERTICAL_GAP = 30;
@@ -456,32 +606,36 @@ export const useGraphStore = create<GraphState>()(
 
         // Separate nodes by type
         const assumptions = nodes.filter((n) => n.type === 'assumption');
-        const operations = nodes.filter((n) => n.type === 'operation');
+        const constants = nodes.filter((n) => n.type === 'constant');
+        const sourceNodes = [...assumptions, ...constants]; // Nodes that are sources (level 0)
+        const intermediateNodes = nodes.filter((n) =>
+          n.type === 'operation' || n.type === 'function' || n.type === 'conditional' || n.type === 'clamp'
+        );
         const resultNode = nodes.find((n) => n.type === 'result');
 
-        // Calculate operation levels using topological sort
+        // Calculate node levels using topological sort
         const nodeLevel = new Map<string, number>();
 
-        // All assumptions are level 0
-        for (const a of assumptions) {
-          nodeLevel.set(a.id, 0);
+        // All source nodes (assumptions and constants) are level 0
+        for (const src of sourceNodes) {
+          nodeLevel.set(src.id, 0);
         }
 
-        // Calculate operation levels based on their inputs
+        // Calculate intermediate node levels based on their inputs
         let changed = true;
         while (changed) {
           changed = false;
-          for (const op of operations) {
-            const incomingEdges = edges.filter((e) => e.target === op.id);
+          for (const node of intermediateNodes) {
+            const incomingEdges = edges.filter((e) => e.target === node.id);
             let maxInputLevel = 0;
             for (const edge of incomingEdges) {
               const inputLevel = nodeLevel.get(edge.source) ?? 0;
               maxInputLevel = Math.max(maxInputLevel, inputLevel);
             }
             const newLevel = maxInputLevel + 1;
-            const currentLevel = nodeLevel.get(op.id) ?? 0;
+            const currentLevel = nodeLevel.get(node.id) ?? 0;
             if (newLevel > currentLevel) {
-              nodeLevel.set(op.id, newLevel);
+              nodeLevel.set(node.id, newLevel);
               changed = true;
             }
           }
@@ -492,13 +646,28 @@ export const useGraphStore = create<GraphState>()(
         // Store computed positions - we need to compute in dependency order
         const nodePositions = new Map<string, { x: number; y: number }>();
 
-        // First, position assumptions vertically on the left
-        assumptions.forEach((node, idx) => {
+        // First, position source nodes (assumptions and constants) vertically on the left
+        sourceNodes.forEach((node, idx) => {
+          const height = node.type === 'assumption' ? ASSUMPTION_HEIGHT : CONSTANT_HEIGHT;
           nodePositions.set(node.id, {
             x: START_X,
-            y: START_Y + idx * (ASSUMPTION_HEIGHT + VERTICAL_GAP),
+            y: START_Y + idx * (Math.max(ASSUMPTION_HEIGHT, CONSTANT_HEIGHT) + VERTICAL_GAP),
           });
         });
+
+        // Get node height based on type
+        const getNodeHeight = (node: EstimateNode): number => {
+          switch (node.type) {
+            case 'assumption': return ASSUMPTION_HEIGHT;
+            case 'constant': return CONSTANT_HEIGHT;
+            case 'operation': return OPERATION_SIZE;
+            case 'function': return FUNCTION_SIZE;
+            case 'conditional': return CONDITIONAL_SIZE;
+            case 'clamp': return CLAMP_SIZE;
+            case 'result': return RESULT_HEIGHT;
+            default: return OPERATION_SIZE;
+          }
+        };
 
         // Get center Y of a node (accounting for different node heights)
         const getNodeCenterY = (nodeId: string): number => {
@@ -506,18 +675,17 @@ export const useGraphStore = create<GraphState>()(
           if (!pos) return START_Y;
           const node = nodes.find((n) => n.id === nodeId);
           if (!node) return pos.y;
-          if (node.type === 'assumption') return pos.y + ASSUMPTION_HEIGHT / 2;
-          if (node.type === 'operation') return pos.y + OPERATION_SIZE / 2;
-          return pos.y + RESULT_HEIGHT / 2;
+          return pos.y + getNodeHeight(node) / 2;
         };
 
-        // Process operations level by level (bracket structure)
-        // Each operation is positioned at the average Y of its inputs
+        // Process intermediate nodes level by level (bracket structure)
+        // Each node is positioned at the average Y of its inputs
         for (let level = 1; level <= maxLevel; level++) {
-          const opsAtLevel = operations.filter((op) => nodeLevel.get(op.id) === level);
+          const nodesAtLevel = intermediateNodes.filter((n) => nodeLevel.get(n.id) === level);
 
-          for (const op of opsAtLevel) {
-            const incomingEdges = edges.filter((e) => e.target === op.id);
+          for (const node of nodesAtLevel) {
+            const incomingEdges = edges.filter((e) => e.target === node.id);
+            const nodeHeight = getNodeHeight(node);
 
             // Calculate average Y position of inputs (center of the bracket)
             let avgY = START_Y;
@@ -525,10 +693,10 @@ export const useGraphStore = create<GraphState>()(
               const inputCenterYs = incomingEdges.map((e) => getNodeCenterY(e.source));
               avgY = inputCenterYs.reduce((a, b) => a + b, 0) / inputCenterYs.length;
               // Adjust to top-left position from center
-              avgY -= OPERATION_SIZE / 2;
+              avgY -= nodeHeight / 2;
             }
 
-            nodePositions.set(op.id, {
+            nodePositions.set(node.id, {
               x: START_X + ASSUMPTION_WIDTH + HORIZONTAL_GAP + (level - 1) * (OPERATION_SIZE + HORIZONTAL_GAP),
               y: avgY,
             });
@@ -565,11 +733,70 @@ export const useGraphStore = create<GraphState>()(
           },
         });
       },
+
+      saveVersion: (description) => {
+        const { currentGraph, simulationResult, versions } = get();
+        if (!currentGraph) return;
+
+        // Deep clone the graph to avoid reference issues
+        const graphClone: GraphEstimate = JSON.parse(JSON.stringify({
+          ...currentGraph,
+          createdAt: currentGraph.createdAt.toISOString(),
+          updatedAt: currentGraph.updatedAt.toISOString(),
+        }));
+        // Convert dates back
+        graphClone.createdAt = new Date(graphClone.createdAt);
+        graphClone.updatedAt = new Date(graphClone.updatedAt);
+
+        const version: GraphVersion = {
+          id: uuidv4(),
+          timestamp: new Date(),
+          description,
+          graph: graphClone,
+          simulationResult: simulationResult ? {
+            p5: simulationResult.percentiles.p5,
+            p50: simulationResult.percentiles.p50,
+            p95: simulationResult.percentiles.p95,
+          } : undefined,
+        };
+
+        // Keep last 50 versions max
+        const newVersions = [version, ...versions].slice(0, 50);
+        set({ versions: newVersions });
+      },
+
+      restoreVersion: (versionId) => {
+        const { versions } = get();
+        const version = versions.find((v) => v.id === versionId);
+        if (!version) return;
+
+        // Deep clone the graph
+        const graphClone: GraphEstimate = JSON.parse(JSON.stringify({
+          ...version.graph,
+          createdAt: version.graph.createdAt,
+          updatedAt: new Date().toISOString(),
+        }));
+        // Convert dates back
+        graphClone.createdAt = new Date(graphClone.createdAt);
+        graphClone.updatedAt = new Date(graphClone.updatedAt);
+
+        nodeCounter = graphClone.nodes.length;
+        set({
+          currentGraph: graphClone,
+          simulationResult: null,
+          nodeSimulationResults: new Map(),
+        });
+      },
+
+      clearVersions: () => {
+        set({ versions: [] });
+      },
     }),
     {
       name: 'fermi-graph-storage',
       partialize: (state) => ({
         savedGraphs: state.savedGraphs,
+        versions: state.versions,
       }),
     }
   )

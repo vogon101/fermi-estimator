@@ -24,12 +24,20 @@ import { runGraphSimulation, formatNumber } from '@/lib/monte-carlo';
 import { AssumptionNode } from './AssumptionNode';
 import { OperationNode } from './OperationNode';
 import { ResultNode } from './ResultNode';
-import type { OperationType, EstimateNode } from '@/lib/types';
+import { ConstantNode } from './ConstantNode';
+import { FunctionNode } from './FunctionNode';
+import { ConditionalNode } from './ConditionalNode';
+import { ClampNode } from './ClampNode';
+import type { OperationType, FunctionType, ComparisonType, EstimateNode } from '@/lib/types';
 
 const nodeTypes: NodeTypes = {
   assumption: AssumptionNode,
   operation: OperationNode,
   result: ResultNode,
+  constant: ConstantNode,
+  function: FunctionNode,
+  conditional: ConditionalNode,
+  clamp: ClampNode,
 };
 
 export function GraphEditor() {
@@ -41,8 +49,13 @@ export function GraphEditor() {
     addAssumptionNode,
     addOperationNode,
     addResultNode,
+    addConstantNode,
+    addFunctionNode,
+    addConditionalNode,
+    addClampNode,
     updateResultNode,
     setNodeSimulationResults,
+    saveVersion,
     removeNode,
     removeEdge,
     simulationResult,
@@ -128,6 +141,28 @@ export function GraphEditor() {
     addResultNode();
   }, [addResultNode, hasResultNode]);
 
+  const handleAddConstant = useCallback(() => {
+    addConstantNode({ label: 'Constant', value: 1 });
+  }, [addConstantNode]);
+
+  const handleAddFunction = useCallback(
+    (func: FunctionType) => {
+      addFunctionNode(func);
+    },
+    [addFunctionNode]
+  );
+
+  const handleAddConditional = useCallback(
+    (comparison: ComparisonType) => {
+      addConditionalNode(comparison);
+    },
+    [addConditionalNode]
+  );
+
+  const handleAddClamp = useCallback(() => {
+    addClampNode();
+  }, [addClampNode]);
+
   const handleRunSimulation = useCallback(() => {
     if (!currentGraph) return;
 
@@ -137,7 +172,10 @@ export function GraphEditor() {
     // Store results
     updateResultNode(finalResult);
     setNodeSimulationResults(nodeResults);
-  }, [currentGraph, updateResultNode, setNodeSimulationResults]);
+
+    // Save version after manual simulation
+    saveVersion('Manual simulation');
+  }, [currentGraph, updateResultNode, setNodeSimulationResults, saveVersion]);
 
   const hasSelection = selectedNodes.length > 0 || selectedEdges.length > 0;
 
@@ -170,11 +208,19 @@ export function GraphEditor() {
           nodeColor={(node) => {
             switch (node.type) {
               case 'assumption':
-                return '#3b82f6';
+                return '#3b82f6'; // blue
+              case 'constant':
+                return '#64748b'; // slate
               case 'operation':
-                return '#f59e0b';
+                return '#f59e0b'; // amber
+              case 'function':
+                return '#a855f7'; // purple
+              case 'conditional':
+                return '#6366f1'; // indigo
+              case 'clamp':
+                return '#eab308'; // yellow
               case 'result':
-                return '#10b981';
+                return '#10b981'; // emerald
               default:
                 return '#6b7280';
             }
@@ -189,10 +235,14 @@ export function GraphEditor() {
                 + Add Node
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent>
+            <DropdownMenuContent className="max-h-[400px] overflow-y-auto">
               <DropdownMenuItem onClick={handleAddAssumption}>
                 <span className="w-3 h-3 rounded-full bg-blue-500 mr-2" />
                 Assumption
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleAddConstant}>
+                <span className="w-3 h-3 rounded-full bg-slate-500 mr-2" />
+                Constant
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => handleAddOperation('multiply')}>
@@ -210,6 +260,60 @@ export function GraphEditor() {
               <DropdownMenuItem onClick={() => handleAddOperation('subtract')}>
                 <span className="w-3 h-3 rounded-full bg-red-500 mr-2" />
                 Subtract (−)
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleAddOperation('sum')}>
+                <span className="w-3 h-3 rounded-full bg-emerald-500 mr-2" />
+                Sum (Σ) - Multi-input
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleAddOperation('product')}>
+                <span className="w-3 h-3 rounded-full bg-violet-500 mr-2" />
+                Product (∏) - Multi-input
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => handleAddFunction('sqrt')}>
+                <span className="w-3 h-3 rounded-full bg-purple-500 mr-2" />
+                √x - Square Root
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleAddFunction('square')}>
+                <span className="w-3 h-3 rounded-full bg-purple-500 mr-2" />
+                x² - Square
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleAddFunction('pow')}>
+                <span className="w-3 h-3 rounded-full bg-purple-500 mr-2" />
+                xⁿ - Power
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleAddFunction('log')}>
+                <span className="w-3 h-3 rounded-full bg-purple-500 mr-2" />
+                ln(x) - Natural Log
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleAddFunction('exp')}>
+                <span className="w-3 h-3 rounded-full bg-purple-500 mr-2" />
+                eˣ - Exponential
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleAddFunction('abs')}>
+                <span className="w-3 h-3 rounded-full bg-teal-500 mr-2" />
+                |x| - Absolute Value
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleAddFunction('min')}>
+                <span className="w-3 h-3 rounded-full bg-cyan-500 mr-2" />
+                min(a,b) - Minimum
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleAddFunction('max')}>
+                <span className="w-3 h-3 rounded-full bg-cyan-500 mr-2" />
+                max(a,b) - Maximum
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleAddFunction('custom')}>
+                <span className="w-3 h-3 rounded-full bg-amber-500 mr-2" />
+                f(x) - Custom Expression
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => handleAddConditional('gt')}>
+                <span className="w-3 h-3 rounded-full bg-indigo-500 mr-2" />
+                If-Then-Else (Conditional)
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleAddClamp}>
+                <span className="w-3 h-3 rounded-full bg-yellow-500 mr-2" />
+                Clamp (Bounds)
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={handleAddResult} disabled={hasResultNode}>

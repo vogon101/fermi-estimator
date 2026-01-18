@@ -3,8 +3,15 @@ import { tool } from 'ai';
 
 // Schema definitions for tool parameters
 export const distributionSchema = z.enum(['uniform', 'normal', 'lognormal']);
-export const operationSchema = z.enum(['multiply', 'divide', 'add', 'subtract']);
+export const operationSchema = z.enum(['multiply', 'divide', 'add', 'subtract', 'sum', 'product']);
 export const confidenceSchema = z.enum(['low', 'medium', 'high']);
+export const functionSchema = z.enum([
+  'sqrt', 'square', 'pow', 'exp', 'log', 'log10', 'log2',
+  'abs', 'ceil', 'floor', 'round',
+  'sin', 'cos', 'tan',
+  'min', 'max', 'custom'
+]);
+export const comparisonSchema = z.enum(['gt', 'gte', 'lt', 'lte', 'eq', 'neq']);
 
 // Tool: Create an assumption node
 export const createAssumptionTool = tool({
@@ -198,6 +205,58 @@ export const deleteOperationTool = tool({
   },
 });
 
+// Tool: Create a constant node
+export const createConstantTool = tool({
+  description: 'Create a constant node with a fixed value. Use this for known values that don\'t have uncertainty (e.g., pi, days in a year, conversion factors).',
+  inputSchema: z.object({
+    label: z.string().describe('A short, descriptive name for the constant (e.g., "daysPerYear", "pi", "metersPerKm")'),
+    value: z.number().describe('The fixed value of this constant'),
+    unit: z.string().optional().describe('The unit of measurement'),
+    description: z.string().optional().describe('A brief description of what this constant represents'),
+  }),
+  execute: async (args) => {
+    return { success: true, action: 'createConstant', ...args };
+  },
+});
+
+// Tool: Create a function node
+export const createFunctionTool = tool({
+  description: 'Create a function node to apply a mathematical function to input(s). Functions include: sqrt, square, pow, exp, log, log10, log2, abs, ceil, floor, round, sin, cos, tan, min, max, or custom expression.',
+  inputSchema: z.object({
+    function: functionSchema.describe('The function to apply'),
+    label: z.string().optional().describe('An optional label for this function node'),
+    parameter: z.union([z.number(), z.string()]).optional().describe('For "pow": the exponent. For "custom": the expression using x as variable (e.g., "x * 2 + 1")'),
+  }),
+  execute: async (args) => {
+    return { success: true, action: 'createFunction', ...args };
+  },
+});
+
+// Tool: Create a conditional node
+export const createConditionalTool = tool({
+  description: 'Create a conditional (if-then-else) node. Compares two inputs (a, b) and outputs either the "then" or "else" input based on the comparison result. Has 4 input handles: a, b, then, else.',
+  inputSchema: z.object({
+    comparison: comparisonSchema.describe('The comparison type: gt (>), gte (≥), lt (<), lte (≤), eq (=), neq (≠)'),
+    label: z.string().optional().describe('An optional label for this conditional node'),
+  }),
+  execute: async (args) => {
+    return { success: true, action: 'createConditional', ...args };
+  },
+});
+
+// Tool: Create a clamp node
+export const createClampTool = tool({
+  description: 'Create a clamp/bound node to constrain values within a range. Useful for ensuring values stay within realistic bounds.',
+  inputSchema: z.object({
+    label: z.string().optional().describe('An optional label for this clamp node'),
+    min: z.number().optional().describe('The minimum bound (values below this will be clamped up)'),
+    max: z.number().optional().describe('The maximum bound (values above this will be clamped down)'),
+  }),
+  execute: async (args) => {
+    return { success: true, action: 'createClamp', ...args };
+  },
+});
+
 // Collect all tools
 export const fermiTools = {
   createAssumption: createAssumptionTool,
@@ -205,6 +264,10 @@ export const fermiTools = {
   deleteAssumption: deleteAssumptionTool,
   createOperation: createOperationTool,
   deleteOperation: deleteOperationTool,
+  createConstant: createConstantTool,
+  createFunction: createFunctionTool,
+  createConditional: createConditionalTool,
+  createClamp: createClampTool,
   connectNodes: connectNodesTool,
   createResult: createResultTool,
   buildEstimate: buildEstimateTool,
@@ -225,9 +288,23 @@ You have access to these tools via function calling:
 - updateAssumption: Modify an existing assumption's values OR rename it
 - createAssumption, deleteAssumption: Add or remove assumptions
 - createOperation, deleteOperation, connectNodes, createResult: Build/modify graph structure
+- createConstant: Add fixed values with no uncertainty (e.g., pi, conversion factors, days per year)
+- createFunction: Apply mathematical functions (sqrt, log, exp, pow, abs, min, max, custom expressions)
+- createConditional: If-then-else logic based on comparisons
+- createClamp: Constrain values within bounds
 - clearGraph: Clear the entire graph to start fresh
 - layoutGraph: Re-organize node positions after significant changes
 - setProjectTitle: Set a descriptive title for the project
+
+## Node Types Available
+
+1. **Assumptions**: Values with uncertainty (min, max, distribution)
+2. **Constants**: Fixed values without uncertainty (known facts, conversion factors)
+3. **Operations**: Basic math (multiply, divide, add, subtract) - use "sum" or "product" for combining many inputs
+4. **Functions**: Mathematical transformations (sqrt, log, exp, pow, abs, round, min, max, or custom f(x))
+5. **Conditionals**: If-then-else logic (if a > b then X else Y)
+6. **Clamps**: Bound values within realistic ranges
+7. **Result**: Final output node
 
 DO NOT describe what you would do. DO NOT apologize about limitations. Actually call the tools by invoking them as function calls.
 

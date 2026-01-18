@@ -5,9 +5,17 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
+} from '@/components/ui/dialog';
 import { useGraphStore, buildFormulaFromGraph } from '@/lib/graph-store';
-import { runSimulation } from '@/lib/monte-carlo';
-import type { OperationType, Distribution, Confidence } from '@/lib/types';
+import { runSimulation, runGraphSimulation } from '@/lib/monte-carlo';
+import type { OperationType, FunctionType, ComparisonType, Distribution, Confidence } from '@/lib/types';
 
 interface ToolCall {
   toolName: string;
@@ -27,12 +35,18 @@ export function AIChat() {
     addChatMessage,
     clearChat,
     addAssumptionNode,
+    addConstantNode,
+    addFunctionNode,
+    addConditionalNode,
+    addClampNode,
     updateNode,
     removeNode,
     addOperationNode,
     addResultNode,
     connectNodes,
     updateResultNode,
+    setNodeSimulationResults,
+    saveVersion,
     createNewGraph,
     layoutGraph,
     updateGraphName,
@@ -40,6 +54,7 @@ export function AIChat() {
 
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -148,6 +163,58 @@ export function AIChat() {
             const args = tc.args as { label?: string };
             const id = addResultNode();
             nodeNameToId.set(args.label || 'Result', id);
+            break;
+          }
+
+          case 'createConstant': {
+            const args = tc.args as {
+              label: string;
+              value: number;
+              unit?: string;
+              description?: string;
+            };
+            const id = addConstantNode({
+              label: args.label,
+              value: args.value,
+              unit: args.unit,
+              description: args.description,
+            });
+            nodeNameToId.set(args.label, id);
+            break;
+          }
+
+          case 'createFunction': {
+            const args = tc.args as {
+              function: FunctionType;
+              label?: string;
+              parameter?: number | string;
+            };
+            const label = args.label || args.function;
+            const id = addFunctionNode(args.function, undefined, label, args.parameter);
+            nodeNameToId.set(label, id);
+            break;
+          }
+
+          case 'createConditional': {
+            const args = tc.args as {
+              comparison: ComparisonType;
+              label?: string;
+            };
+            const label = args.label || 'Conditional';
+            const id = addConditionalNode(args.comparison, undefined, label);
+            nodeNameToId.set(label, id);
+            break;
+          }
+
+          case 'createClamp': {
+            const args = tc.args as {
+              label?: string;
+              min?: number;
+              max?: number;
+            };
+            const label = args.label || 'Clamp';
+            const id = addClampNode(undefined, label, args.min, args.max);
+            nodeNameToId.set(label, id);
             break;
           }
 
@@ -289,6 +356,19 @@ export function AIChat() {
                 connectNodes(finalNodeId, resultId);
               }
             }
+
+            // Run simulation automatically after building to populate intermediate graphs
+            // Use setTimeout to ensure the graph state is updated before running simulation
+            setTimeout(() => {
+              const latestGraph = useGraphStore.getState().currentGraph;
+              if (latestGraph) {
+                const { finalResult, nodeResults } = runGraphSimulation(latestGraph, 10000);
+                useGraphStore.getState().updateResultNode(finalResult);
+                useGraphStore.getState().setNodeSimulationResults(nodeResults);
+                // Save version after AI builds estimate
+                useGraphStore.getState().saveVersion('AI built estimate');
+              }
+            }, 100);
             break;
           }
 
@@ -297,24 +377,12 @@ export function AIChat() {
             // Get fresh state from store (currentGraph in closure may be stale)
             const latestGraph = useGraphStore.getState().currentGraph;
             if (latestGraph) {
-              const { formula, assumptions } = buildFormulaFromGraph(latestGraph);
-              if (formula && assumptions.size > 0) {
-                const assumptionsArray = Array.from(assumptions.entries()).map(
-                  ([id, data]) => ({
-                    id,
-                    name: data.name.replace(/\s+/g, '_'),
-                    min: data.min,
-                    max: data.max,
-                    distribution: data.distribution,
-                  })
-                );
-                const result = runSimulation(
-                  assumptionsArray,
-                  formula,
-                  args.iterations || 10000
-                );
-                updateResultNode(result);
-              }
+              // Use graph simulation to track intermediate results
+              const { finalResult, nodeResults } = runGraphSimulation(latestGraph, args.iterations || 10000);
+              updateResultNode(finalResult);
+              setNodeSimulationResults(nodeResults);
+              // Save version after simulation
+              saveVersion('Ran simulation');
             }
             break;
           }
@@ -352,12 +420,18 @@ export function AIChat() {
     },
     [
       addAssumptionNode,
+      addConstantNode,
+      addFunctionNode,
+      addConditionalNode,
+      addClampNode,
       updateNode,
       removeNode,
       addOperationNode,
       addResultNode,
       connectNodes,
       updateResultNode,
+      setNodeSimulationResults,
+      saveVersion,
       createNewGraph,
       layoutGraph,
       updateGraphName,
@@ -452,6 +526,7 @@ export function AIChat() {
   ];
 
   return (
+    <>
     <Card className="flex flex-col h-full">
       <div className="flex items-center justify-between p-3 border-b">
         <h3 className="text-sm font-semibold">AI Assistant</h3>
@@ -459,10 +534,10 @@ export function AIChat() {
           <Button
             variant="ghost"
             size="sm"
-            className="h-6 text-xs"
-            onClick={clearChat}
+            className="h-6 text-xs text-muted-foreground hover:text-destructive"
+            onClick={() => setShowClearConfirm(true)}
           >
-            Clear
+            Clear Chat
           </Button>
         )}
       </div>
@@ -537,5 +612,31 @@ export function AIChat() {
         </Button>
       </form>
     </Card>
+
+    <Dialog open={showClearConfirm} onOpenChange={setShowClearConfirm}>
+      <DialogContent className="sm:max-w-[350px]">
+        <DialogHeader>
+          <DialogTitle>Clear Chat History</DialogTitle>
+          <DialogDescription>
+            Are you sure you want to clear all {chatMessages.length} messages? This will reset the AI context.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setShowClearConfirm(false)}>
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            onClick={() => {
+              clearChat();
+              setShowClearConfirm(false);
+            }}
+          >
+            Clear All
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }

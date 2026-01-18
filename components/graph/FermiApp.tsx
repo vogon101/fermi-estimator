@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/dialog';
 import { GraphEditor } from './GraphEditor';
 import { AIChat } from './AIChat';
+import { VersionHistory } from './VersionHistory';
 import { useGraphStore } from '@/lib/graph-store';
 
 export function FermiApp() {
@@ -33,6 +34,7 @@ export function FermiApp() {
   const [isUnsavedDialogOpen, setIsUnsavedDialogOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  const [activeTab, setActiveTab] = useState<'chat' | 'history'>('chat');
 
   // Check if there are unsaved changes
   const hasUnsavedChanges = useCallback(() => {
@@ -247,9 +249,37 @@ export function FermiApp() {
             <GraphEditor />
           </div>
 
-          {/* AI Chat - takes 1/3 of the space */}
+          {/* Right sidebar with tabs */}
           <div className="flex-1 flex flex-col min-w-[350px] max-w-[450px]">
-            <AIChat />
+            <div className="flex flex-col h-full">
+              <div className="border-b shrink-0">
+                <div className="flex">
+                  <button
+                    onClick={() => setActiveTab('chat')}
+                    className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                      activeTab === 'chat'
+                        ? 'border-primary text-foreground'
+                        : 'border-transparent text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    AI Chat
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('history')}
+                    className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                      activeTab === 'history'
+                        ? 'border-primary text-foreground'
+                        : 'border-transparent text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    History
+                  </button>
+                </div>
+              </div>
+              <div className="flex-1 min-h-0">
+                {activeTab === 'chat' ? <AIChat /> : <VersionHistory />}
+              </div>
+            </div>
           </div>
         </div>
 
